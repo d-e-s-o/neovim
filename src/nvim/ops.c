@@ -1768,9 +1768,21 @@ int op_delete(oparg_T *oap)
       mb_adjust_opend(oap);
     }
 
+    // Track whether this is a delete-to-end-of-line operation (e.g., D, d$)
+    // before the deletion happens, while we still know the original line length.
+    bool delete_to_eol = false;
+
     if (oap->line_count == 1) {         // delete characters within one line
       if (u_save_cursor() == FAIL) {            // save line for undo
         return FAIL;
+      }
+
+      // Check if deletion extends to end of line (for skipping auto_format later)
+      if (oap->op_type == OP_DELETE) {
+        colnr_T orig_len = get_cursor_line_len();
+        // For inclusive motion: end.col is last char to delete, so end.col + 1 >= orig_len
+        // For non-inclusive: end.col is one past last char, so end.col >= orig_len
+        delete_to_eol = (oap->end.col + oap->inclusive >= orig_len);
       }
 
       // if 'cpoptions' contains '$', display '$' at end of change
@@ -1841,7 +1853,12 @@ int op_delete(oparg_T *oap)
                      0, 0, 0, kExtmarkUndo);
     }
     if (oap->op_type == OP_DELETE) {
-      auto_format(false, true);
+      // Don't auto-format when deleting to end of line (e.g., D, d$).
+      // The deleted text was at the end, not in the middle of a paragraph,
+      // so reformatting would be unexpected and disruptive.
+      if (!delete_to_eol) {
+        auto_format(false, true);
+      }
     }
   }
 
